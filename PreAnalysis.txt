@@ -1,0 +1,64 @@
+CREATE EXTERNAL TABLE IF NOT EXISTS ranked_table(
+card_id string,
+amount double,
+postcode string,
+transaction_dt timestamp,
+rank int)
+STORED AS ORC location 's3a://capstone-deepika/ranked_table'
+tblproperties ("orc.compress"="SNAPPY");
+
+INSERT INTO ranked_table
+select * from
+(select * , rank() OVER(PARTITION BY card_id ORDER BY transaction_dt DESC)rank from
+(select card_id, amount , postcode , transaction_dt from card_transaction_ext where status = 'GENUINE')a
+GROUP BY card_id, amount , postcode , transaction_dt)b where rank <= 10;
+
+CREATE EXTERNAL TABLE IF NOT EXISTS wrangled_staging_tbl(
+card_id string,
+average double,
+standard_deviation double)
+STORED AS ORC location 's3a://capstone-deepika/wrangled_staging_tbl'
+tblproperties ("orc.compress"="SNAPPY");
+
+INSERT INTO wrangled_staging_tbl
+Select card_id, AVG(amount), STDDEV(amount) from ranked_table group by card_id;
+
+CREATE EXTERNAL TABLE IF NOT EXISTS ucl_calc_ext(
+card_id string,
+ucl double)
+STORED AS ORC location 's3a://capstone-deepika/ucl_calc_ext'
+tblproperties ("orc.compress"="SNAPPY");
+
+INSERT INTO ucl_calc_ext
+Select card_id, (average + 3* standard_deviation) as UCL from wrangled_staging_tbl;
+
+create external table if not exists lookup_interim_join(
+card_id string,
+member_id string,
+score bigint)
+STORED AS ORC location 's3a://capstone-deepika/lookup_interim_join'
+tblproperties ("orc.compress"="SNAPPY");
+
+INSERT into lookup_interim_join
+Select card_member_ext.card_id , card_member_ext.member_id , member_score_ext.score
+FROM card_member_ext INNER JOIN member_score_ext ON
+(card_member_ext.member_id = member_score_ext.member_id);
+
+CREATE EXTERNAL TABLE IF NOT EXISTS lookup_joined_ext(
+card_id string,
+UCL double,
+score bigint,
+postcode string,
+transaction_dt timestamp
+)
+STORED AS ORC location 's3a://capstone-deepika/lookup_joined_ext'
+tblproperties ("orc.compress"="SNAPPY");
+
+INSERT INTO lookup_joined_ext
+select ucl_calc_ext.card_id , ucl_calc_ext.ucl , lookup_interim_join.score , ranked_table.postcode , ranked_table.transaction_dt
+FROM ucl_calc_ext JOIN lookup_interim_join ON (ucl_calc_ext.card_id = lookup_interim_join.card_id)
+JOIN ranked_table ON (ranked_table.card_id = lookup_interim_join.card_id  AND ranked_table.rank = 1);
+
+insert overwrite table lookup_hbase 
+select card_id,ucl,score,postcode,transaction_dt from lookup_joined_ext;
+

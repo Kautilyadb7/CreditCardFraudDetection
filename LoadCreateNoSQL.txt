@@ -1,0 +1,46 @@
+CREATE TABLE IF NOT EXISTS card_transaction_staging(
+card_id string,
+member_id string,
+amount double,
+postcode string,
+pos_id string,
+transaction_dt string,
+status string
+)
+ROW FORMAT SERDE 'org.apache.hadoop.hive.serde2.OpenCSVSerde' 
+WITH SERDEPROPERTIES ("separatorChar" = ",")
+tblproperties ("skip.header.line.count"="1");
+
+load data inpath '/capstone/data/card_transactions.csv' into table card_transaction_staging;
+
+CREATE EXTERNAL TABLE IF NOT EXISTS card_transaction_ext(
+`card_id` string,
+`member_id` string,
+`amount` double,
+`postcode` string,
+`pos_id` string,
+`transaction_dt` timestamp,
+`status` string)
+STORED AS ORC
+LOCATION 's3a://capstone-deepika/tables'
+tblproperties ("orc.compress"="SNAPPY");
+
+From card_transaction_staging
+insert overwrite table card_transaction_ext
+select card_id,member_id,amount,postcode,pos_id,cast(from_unixtime(unix_timestamp(transaction_dt,'dd-MM-yyyy HH:mm:ss')) as timestamp),status;
+
+Create table transactions_hbase(key struct<`member_id`:string, `amount`:double, `transaction_dt`:timestamp>,`card_id` string,`postcode` string,`pos_id` string,`status` string)
+STORED BY 'org.apache.hadoop.hive.hbase.HBaseStorageHandler'
+WITH SERDEPROPERTIES
+("hbase.columns.mapping"=":key,ctfamily:card_id,ctfamily:postcode,ctfamily:pos_id,ctfamily:status")
+TBLPROPERTIES ("hbase.table.name"="transactions_hive");
+
+insert overwrite table transactions_hbase 
+select named_struct('member_id',card_transaction_ext.member_id,'amount',card_transaction_ext.amount,'transaction_dt',card_transaction_ext.transaction_dt),card_transaction_ext.card_id,card_transaction_ext.postcode,card_transaction_ext.pos_id,card_transaction_ext.status 
+from card_transaction_ext;
+
+
+create table lookup_hbase(`card_id` string,`ucl` double,`score` bigint,`postcode` string, `transaction_dt` timestamp)
+STORED BY 'org.apache.hadoop.hive.hbase.HBaseStorageHandler'
+WITH SERDEPROPERTIES ("hbase.columns.mapping" = ":key,ctfamily:ucl,ctfamily:score,ctfamily:postcode,ctfamily:transaction_dt")
+TBLPROPERTIES ("hbase.table.name" = "lookup_hive");

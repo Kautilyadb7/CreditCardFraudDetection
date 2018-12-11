@@ -1,0 +1,47 @@
+sqoop import --connect jdbc:mysql://upgradawsrds.cpclxrkdvwmz.us-east-1.rds.amazonaws.com/cred_financials_data --username upgraduser --password upgraduser --table member_score --null-string 'NA' --null-non-string '\\N' --delete-target-dir --target-dir /capstone/member_score
+
+sqoop import --connect jdbc:mysql://upgradawsrds.cpclxrkdvwmz.us-east-1.rds.amazonaws.com/cred_financials_data --username upgraduser --password upgraduser --table card_member --null-string 'NA' --null-non-string '\\N' --delete-target-dir --target-dir /capstone/card_member
+
+CREATE TABLE IF NOT EXISTS member_score(
+member_id string,
+score bigint
+)ROW FORMAT SERDE 'org.apache.hadoop.hive.serde2.OpenCSVSerde' WITH SERDEPROPERTIES ("separatorChar" = ",");
+
+load data inpath '/capstone/member_score' overwrite into table member_score;
+
+CREATE TABLE IF NOT EXISTS card_member(
+card_id string,
+member_id string,
+member_joining_dt timestamp,
+card_purchase_dt string,
+country string,
+city string
+)ROW FORMAT SERDE 'org.apache.hadoop.hive.serde2.OpenCSVSerde' WITH SERDEPROPERTIES ("separatorChar" = ",");
+
+load data inpath '/capstone/card_member' overwrite into table card_member;
+
+CREATE EXTERNAL TABLE IF NOT EXISTS member_score_ext(
+member_id string,
+score bigint
+)
+STORED AS ORC location 's3a://capstone-deepika/member_score'
+tblproperties ("orc.compress"="SNAPPY");
+
+From member_score
+insert overwrite table member_score_ext
+Select member_id,score;
+
+CREATE EXTERNAL TABLE IF NOT EXISTS card_member_ext(
+card_id string,
+member_id string,
+member_joining_dt timestamp,
+card_purchase_dt string,
+country string,
+city string
+)
+STORED AS ORC location 's3a://capstone-deepika/card_member'
+tblproperties ("orc.compress"="SNAPPY");
+
+From card_member
+insert overwrite table card_member_ext 
+select card_id , member_id ,member_joining_dt, card_purchase_dt , country , city;

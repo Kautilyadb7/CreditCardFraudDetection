@@ -1,0 +1,62 @@
+<workflow-app name="capstone" xmlns="uri:oozie:workflow:0.4">
+<start to="card_member_import"/>
+<action name="card_member_import">
+        <sqoop xmlns="uri:oozie:sqoop-action:0.2">
+            <job-tracker>${jobTracker}</job-tracker>
+            <name-node>${nameNode}</name-node>
+            <job-xml>sqoop-site.xml</job-xml>
+        <configuration>
+                <property>
+                        <name>fs.hdfs.impl.disable.cache</name>
+                        <value>true</value>
+                </property>
+               <property>
+                        <name>mapred.job.queue.name</name>
+                        <value>default</value>
+               </property>
+        </configuration>
+        <command>job --exec inc_upsert_card_member --meta-connect jdbc:hsqldb:hsql://ip-172-31-46-84.ec2.internal:16000/sqoop</command>
+       </sqoop>
+        <ok to="member_score_import"/>
+        <error to="kill"/>
+</action>
+
+
+<action name="member_score_import">
+        <sqoop xmlns="uri:oozie:sqoop-action:0.2">
+            <job-tracker>${jobTracker}</job-tracker>
+            <name-node>${nameNode}</name-node>
+            <job-xml>sqoop-site.xml</job-xml>
+        <configuration>
+                <property>
+                        <name>fs.hdfs.impl.disable.cache</name>
+                        <value>true</value>
+                </property>
+               <property>
+                        <name>mapred.job.queue.name</name>
+                        <value>default</value>
+               </property>
+        </configuration>
+        <command>job --exec update_member_score --meta-connect jdbc:hsqldb:hsql://ip-172-31-46-84.ec2.internal:16000/sqoop</command>
+       </sqoop>
+        <ok to="load_hbase_lookup"/>
+        <error to="kill"/>
+</action>
+
+<action name="load_hbase_lookup">
+        <hive2 xmlns="uri:oozie:hive2-action:0.1">
+            <job-tracker>${jobTracker}</job-tracker>
+            <name-node>${nameNode}</name-node>
+            <jdbc-url>jdbc:hive2://ip-172-31-46-84.ec2.internal:10000/default</jdbc-url>
+            <script>${hivescript}</script>
+        </hive2>
+        <ok to="finish"/>
+        <error to="kill"/>
+    </action>
+
+    <kill name="kill">
+        <message>Your job failed!</message>
+    </kill>
+<end name="finish"/>
+
+</workflow-app>
